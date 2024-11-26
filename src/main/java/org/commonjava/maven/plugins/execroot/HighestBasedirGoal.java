@@ -16,10 +16,14 @@
 
 package org.commonjava.maven.plugins.execroot;
 
+import org.apache.maven.execution.MavenSession;
+import org.apache.maven.model.Model;
 import org.apache.maven.plugin.ContextEnabled;
 import org.apache.maven.plugin.Mojo;
 import org.apache.maven.plugin.MojoExecutionException;
-import org.apache.maven.project.MavenProject;
+import org.apache.maven.project.*;
+import org.codehaus.plexus.component.repository.exception.ComponentLookupException;
+import sun.awt.shell.ShellFolder;
 
 import java.io.File;
 import java.nio.file.Paths;
@@ -95,9 +99,36 @@ public class HighestBasedirGoal
                 files.add( 0, file );
             }
 
-            if ( p.getParent() != null )
+            // get parent project, considering relativePath
+            Model model = p.getModel();
+            if ( model.getParent() != null )
             {
-                toCheck.add( p.getParent() );
+                if (model.getParent().getRelativePath() != null )
+                {
+                    String parentPath = model.getParent().getRelativePath().trim();
+                    if ( "".equals(parentPath))
+                    {
+                        parentPath = "../pom.xml";
+                    }
+                    else if ( !parentPath.endsWith( "pom.xml" ) )
+                    {
+                        parentPath = parentPath.endsWith("/") ? parentPath + "pom.xml" : parentPath + "/pom.xml";
+                    }
+                    File parentFile = new File( file, parentPath );
+                    getLog().info("Loading relative parent project at: " + parentFile.getAbsolutePath());
+                    // 加载父项目的 MavenProject 对象
+                    try {
+                        MavenProject parentProject = loadMavenProject(parentFile);
+                        toCheck.add(parentProject);
+                    } catch (Exception e) {
+                        getLog().error("Fail to load parent project at: " + parentFile.getAbsolutePath());
+                        throw new MojoExecutionException("Fail to load parent project at: " + parentFile.getAbsolutePath(), e);
+                    }
+                }
+                else if ( p.getParent() != null )
+                {
+                    toCheck.add(p.getParent());
+                }
             }
         }
 
@@ -129,6 +160,17 @@ public class HighestBasedirGoal
         }
 
         return dir;
+    }
+
+    public MavenProject loadMavenProject(File pomFile) throws ProjectBuildingException, ComponentLookupException {
+        // 创建一个 ProjectBuildingRequest 对象
+        ProjectBuildingRequest buildingRequest = new DefaultProjectBuildingRequest(session.getProjectBuildingRequest());
+
+        // 获取 ProjectBuilder 对象
+        ProjectBuilder projectBuilder = session.getContainer().lookup(ProjectBuilder.class);
+
+        // 构建 MavenProject 对象
+        return projectBuilder.build(pomFile, buildingRequest).getProject();
     }
 
     /**
